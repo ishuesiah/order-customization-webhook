@@ -104,10 +104,26 @@ app.get('/', async (req, res) => {
       color: #6b7280;
     }
   </style>
+  <script>
+    // Convert UTC to PST
+    function formatPST(utcDateStr) {
+      const date = new Date(utcDateStr);
+      return date.toLocaleString('en-US', { 
+        timeZone: 'America/Los_Angeles',
+        year: 'numeric',
+        month: 'numeric',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: true
+      });
+    }
+  </script>
 </head>
 <body>
   <h1>🎯 Webhook Queue Dashboard</h1>
-  <p style="color: #6b7280;">Auto-refreshes every 30 seconds</p>
+  <p style="color: #6b7280;">Auto-refreshes every 30 seconds • Times shown in PST</p>
   
   <div class="stats">
     ${stats.map(s => `
@@ -127,8 +143,8 @@ app.get('/', async (req, res) => {
         <th>Tag</th>
         <th>Note Preview</th>
         <th>Attempts</th>
-        <th>Created</th>
-        <th>Updated</th>
+        <th>Created (PST)</th>
+        <th>Updated (PST)</th>
       </tr>
     </thead>
     <tbody>
@@ -139,8 +155,8 @@ app.get('/', async (req, res) => {
           <td><span class="tag-${order.tag_type}">${order.tag_type}</span></td>
           <td class="note-preview">${order.formatted_note.substring(0, 50)}...</td>
           <td>${order.attempts}</td>
-          <td>${new Date(order.created_at).toLocaleString()}</td>
-          <td>${new Date(order.updated_at).toLocaleString()}</td>
+          <td><script>document.write(formatPST('${order.created_at}'));</script></td>
+          <td><script>document.write(formatPST('${order.updated_at}'));</script></td>
         </tr>
       `).join('')}
     </tbody>
@@ -151,6 +167,7 @@ app.get('/', async (req, res) => {
     <p><strong>Endpoint:</strong> POST /webhooks/shopify/orders/create</p>
     <p><strong>Worker:</strong> Run <code>node worker.js</code> to process pending orders</p>
     <p><strong>Database:</strong> ${process.env.DB_PATH || './webhook-queue.db'}</p>
+    <p><strong>Current Time (PST):</strong> <script>document.write(new Date().toLocaleString('en-US', { timeZone: 'America/Los_Angeles' }));</script></p>
   </div>
 </body>
 </html>
