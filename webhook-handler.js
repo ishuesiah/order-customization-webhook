@@ -135,9 +135,13 @@ function formatTepoCustomizations(lineItems = []) {
 async function findShipStationOrderByNumber(orderNumber) {
   const url = 'https://ssapi.shipstation.com/orders';
   
+  // ShipStation stores order numbers WITHOUT the # symbol
+  // Shopify sends them WITH the # symbol, so we need to strip it
+  const cleanOrderNumber = orderNumber.replace('#', '');
+  
   try {
     const response = await axios.get(url, {
-      params: { orderNumber },
+      params: { orderNumber: cleanOrderNumber },
       auth: {
         username: process.env.SHIPSTATION_API_KEY,
         password: process.env.SHIPSTATION_API_SECRET
