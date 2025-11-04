@@ -139,6 +139,8 @@ async function findShipStationOrderByNumber(orderNumber) {
   // Shopify sends them WITH the # symbol, so we need to strip it
   const cleanOrderNumber = orderNumber.replace('#', '');
   
+  console.log(`🔎 DEBUG: Searching ShipStation for order number: "${cleanOrderNumber}"`);
+  
   try {
     const response = await axios.get(url, {
       params: { orderNumber: cleanOrderNumber },
@@ -149,10 +151,21 @@ async function findShipStationOrderByNumber(orderNumber) {
       timeout: 15000, // 15 second timeout
     });
 
-    // Return the first matching order, or null if none found
-    return (response.data?.orders?.[0]) || null;
+    console.log(`🔎 DEBUG: ShipStation returned ${response.data?.orders?.length || 0} orders`);
+    
+    if (response.data?.orders?.length > 0) {
+      const order = response.data.orders[0];
+      console.log(`🔎 DEBUG: Found order! ID: ${order.orderId}, Number: "${order.orderNumber}"`);
+      return order;
+    }
+    
+    console.log(`🔎 DEBUG: No orders found matching "${cleanOrderNumber}"`);
+    return null;
   } catch (error) {
     console.error(`❌ Error finding order ${orderNumber}:`, error.message);
+    if (error.response?.data) {
+      console.error(`❌ ShipStation error details:`, JSON.stringify(error.response.data));
+    }
     return null;
   }
 }
@@ -195,14 +208,29 @@ async function updateShipStationGiftMessage(orderId, message) {
  * Polls ShipStation repeatedly with exponential backoff until order is found
  * This is necessary because Shopify webhook fires BEFORE order syncs to ShipStation
  * 
- * Backoff schedule: 2s, 4s, 8s, 16s, 32s, 32s (total ~94 seconds of waiting)
+ * Backoff schedule: 5s, 10s, 15s, 20s, then 60s intervals up to 10 minutes total
  * 
  * @param {string} orderNumber - The Shopify order number
  * @param {string} giftMessage - The formatted gift message to set
  * @returns {Promise<boolean>} - True if successful, false if gave up
  */
 async function pollShipStationAndUpdate(orderNumber, giftMessage) {
-  const backoffs = [2000, 4000, 8000, 16000, 32000, 32000]; // milliseconds
+  // Start with shorter intervals, then switch to 60s intervals
+  // Total wait time: ~10 minutes (plenty of time for sync)
+  const backoffs = [
+    5000,   // 5s
+    10000,  // 10s  
+    15000,  // 15s
+    20000,  // 20s
+    60000,  // 1min
+    60000,  // 1min
+    60000,  // 1min
+    60000,  // 1min
+    60000,  // 1min
+    60000,  // 1min
+    60000,  // 1min
+    60000,  // 1min (total ~10 minutes)
+  ];
   
   for (let i = 0; i < backoffs.length; i++) {
     console.log(`🔍 Looking for order ${orderNumber} in ShipStation (attempt ${i + 1}/${backoffs.length})...`);
@@ -222,7 +250,7 @@ async function pollShipStationAndUpdate(orderNumber, giftMessage) {
   }
   
   // Gave up after all retries
-  console.warn(`⚠️ Gave up waiting for order ${orderNumber} to appear in ShipStation`);
+  console.warn(`⚠️ Gave up waiting for order ${orderNumber} to appear in ShipStation after 10 minutes`);
   return false;
 }
 
