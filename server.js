@@ -523,14 +523,28 @@ async function updateGiftMessage(orderId, giftMessage) {
     console.log(`  📝 Getting full order ${orderId}...`);
     const fullOrder = await getFullOrder(orderId);
     
+    // DEBUG: Log what we GET from ShipStation
+    console.log(`  🔍 BEFORE UPDATE - Order has ${fullOrder.customsItems?.length || 0} customs items`);
+    console.log(`  🔍 BEFORE UPDATE - customsItems:`, JSON.stringify(fullOrder.customsItems, null, 2));
+    console.log(`  🔍 BEFORE UPDATE - internationalOptions:`, JSON.stringify(fullOrder.internationalOptions, null, 2));
+    
     console.log(`  📝 Updating gift message...`);
     const updatedOrder = {
       ...fullOrder,
       giftMessage: giftMessage
     };
     
+    // DEBUG: Log what we're SENDING to ShipStation
+    console.log(`  🔍 SENDING TO SS - Order has ${updatedOrder.customsItems?.length || 0} customs items`);
+    console.log(`  🔍 SENDING TO SS - customsItems:`, JSON.stringify(updatedOrder.customsItems, null, 2));
+    
     await client.post('/orders/createorder', updatedOrder);
     console.log(`  ✅ Gift message updated`);
+    
+    // DEBUG: Get the order again to see what changed
+    const afterOrder = await getFullOrder(orderId);
+    console.log(`  🔍 AFTER UPDATE - Order has ${afterOrder.customsItems?.length || 0} customs items`);
+    console.log(`  🔍 AFTER UPDATE - customsItems:`, JSON.stringify(afterOrder.customsItems, null, 2));
     
     return true;
   } catch (error) {
