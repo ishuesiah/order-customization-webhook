@@ -1,24 +1,27 @@
 {
-  "name": "shopify-tepo-webhook",
+  "name": "shopify-shipstation-webhook-queue",
   "version": "1.0.0",
-  "description": "Shopify webhook handler that formats Tepo customizations into ShipStation gift notes",
+  "description": "Webhook queue system for formatting Tepo customizations and tagging orders in ShipStation",
   "main": "webhook-handler.js",
   "scripts": {
     "start": "node webhook-handler.js",
-    "dev": "nodemon webhook-handler.js"
+    "worker": "node worker.js",
+    "dev": "nodemon webhook-handler.js",
+    "dev:worker": "nodemon worker.js"
   },
   "keywords": [
     "shopify",
-    "webhook",
     "shipstation",
-    "tepo",
+    "webhook",
+    "queue",
     "customizations"
   ],
   "author": "Hemlock & Oak Stationery Inc.",
   "license": "MIT",
   "dependencies": {
+    "axios": "^1.6.2",
     "express": "^4.18.2",
-    "axios": "^1.6.2"
+    "sqlite3": "^5.1.7"
   },
   "devDependencies": {
     "nodemon": "^3.0.2"
