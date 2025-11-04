@@ -171,20 +171,48 @@ async function findShipStationOrderByNumber(orderNumber) {
 }
 
 /**
+ * Gets the complete order details from ShipStation
+ * @param {number} orderId - The ShipStation internal order ID
+ * @returns {Object} - Complete order object with all fields
+ */
+async function getFullOrder(orderId) {
+  const url = `https://ssapi.shipstation.com/orders/${orderId}`;
+  
+  try {
+    const response = await axios.get(url, {
+      auth: {
+        username: process.env.SHIPSTATION_API_KEY,
+        password: process.env.SHIPSTATION_API_SECRET
+      },
+      timeout: 15000,
+    });
+    
+    return response.data;
+  } catch (error) {
+    console.error(`❌ Error getting full order ${orderId}:`, error.message);
+    throw error;
+  }
+}
+
+/**
  * Updates ONLY the gift message field in ShipStation (preserves all other data)
  * We have to GET the full order first, then POST it back with gift message changed
  * because ShipStation's API requires all fields even for partial updates
  * 
  * @param {number} orderId - The ShipStation internal order ID
  * @param {string} message - The gift message content
- * @param {object} fullOrder - The complete order object from ShipStation
  */
-async function updateShipStationGiftMessage(orderId, message, fullOrder) {
+async function updateShipStationGiftMessage(orderId, message) {
   const url = 'https://ssapi.shipstation.com/orders/createorder';
   
-  console.log(`📝 Updating gift message for order ID ${orderId}...`);
+  console.log(`📝 Getting full order ${orderId} from ShipStation...`);
   
   try {
+    // First, GET the complete order with all fields
+    const fullOrder = await getFullOrder(orderId);
+    
+    console.log(`📝 Updating gift message for order ${orderId}...`);
+    
     // Take the full order object and only change the gift message
     const updatedOrder = {
       ...fullOrder,           // Keep everything the same
@@ -242,8 +270,8 @@ async function pollShipStationAndUpdate(orderNumber, giftMessage) {
     
     if (found) {
       // Success! Order exists in ShipStation, update the gift note
-      // Pass the full order object so we can preserve all fields
-      await updateShipStationGiftMessage(found.orderId, giftMessage, found);
+      // The function will GET the full order itself
+      await updateShipStationGiftMessage(found.orderId, giftMessage);
       console.log(`✅ Completed processing for order ${orderNumber}`);
       return true;
     }
