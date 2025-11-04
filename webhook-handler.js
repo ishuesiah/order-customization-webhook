@@ -1,390 +1,348 @@
 // webhook-handler.js
-// Shopify → ShipStation Gift Note Formatter
-// Formats Tepo customizations cleanly into ShipStation's Gift Message field
+// Receives Shopify webhooks and queues them for processing
 
 const express = require('express');
 const crypto = require('crypto');
-const axios = require('axios');
+const { Database } = require('./database');
 
-// ══════════════════════════════════════════════════════════════════════════════
-// SETUP
-// ══════════════════════════════════════════════════════════════════════════════
 const app = express();
 const PORT = process.env.PORT || 3000;
+const db = new Database();
 
-// Health check endpoint (for Kinsta monitoring)
+// Initialize database
+db.initialize().catch(err => {
+  console.error('Failed to initialize database:', err);
+  process.exit(1);
+});
+
+// Health check
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'healthy', timestamp: new Date().toISOString() });
 });
 
-// Root endpoint (just for testing)
-app.get('/', (req, res) => {
-  res.status(200).send('🎉 Shopify Webhook Handler is running!');
+// Admin dashboard
+app.get('/', async (req, res) => {
+  try {
+    const stats = await db.getStats();
+    const recentOrders = await db.getRecentOrders(50);
+    
+    // Build HTML dashboard
+    const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Webhook Queue Dashboard</title>
+  <meta http-equiv="refresh" content="30">
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+      background: #f3f4f6;
+    }
+    h1 { color: #1f2937; }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 15px;
+      margin: 20px 0;
+    }
+    .stat-card {
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+    .stat-number {
+      font-size: 32px;
+      font-weight: bold;
+      color: #6366f1;
+    }
+    .stat-label {
+      color: #6b7280;
+      font-size: 14px;
+      margin-top: 5px;
+    }
+    table {
+      width: 100%;
+      background: white;
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+    th {
+      background: #6366f1;
+      color: white;
+      padding: 12px;
+      text-align: left;
+    }
+    td {
+      padding: 12px;
+      border-bottom: 1px solid #e5e7eb;
+    }
+    tr:hover {
+      background: #f9fafb;
+    }
+    .status {
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: bold;
+    }
+    .status-pending { background: #fef3c7; color: #92400e; }
+    .status-completed { background: #d1fae5; color: #065f46; }
+    .status-failed { background: #fee2e2; color: #991b1b; }
+    .tag-charm { color: #db2777; }
+    .tag-customization { color: #7c3aed; }
+    .note-preview {
+      max-width: 300px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 12px;
+      color: #6b7280;
+    }
+  </style>
+</head>
+<body>
+  <h1>🎯 Webhook Queue Dashboard</h1>
+  <p style="color: #6b7280;">Auto-refreshes every 30 seconds</p>
+  
+  <div class="stats">
+    ${stats.map(s => `
+      <div class="stat-card">
+        <div class="stat-number">${s.count}</div>
+        <div class="stat-label">${s.status.toUpperCase()}</div>
+      </div>
+    `).join('')}
+  </div>
+
+  <h2>Recent Orders</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Order #</th>
+        <th>Status</th>
+        <th>Tag</th>
+        <th>Note Preview</th>
+        <th>Attempts</th>
+        <th>Created</th>
+        <th>Updated</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${recentOrders.map(order => `
+        <tr>
+          <td><strong>${order.order_number}</strong></td>
+          <td><span class="status status-${order.status}">${order.status}</span></td>
+          <td><span class="tag-${order.tag_type}">${order.tag_type}</span></td>
+          <td class="note-preview">${order.formatted_note.substring(0, 50)}...</td>
+          <td>${order.attempts}</td>
+          <td>${new Date(order.created_at).toLocaleString()}</td>
+          <td>${new Date(order.updated_at).toLocaleString()}</td>
+        </tr>
+      `).join('')}
+    </tbody>
+  </table>
+
+  <div style="margin-top: 20px; padding: 15px; background: white; border-radius: 8px;">
+    <h3>🛠️ System Info</h3>
+    <p><strong>Endpoint:</strong> POST /webhooks/shopify/orders/create</p>
+    <p><strong>Worker:</strong> Run <code>node worker.js</code> to process pending orders</p>
+    <p><strong>Database:</strong> ${process.env.DB_PATH || './webhook-queue.db'}</p>
+  </div>
+</body>
+</html>
+    `;
+    
+    res.send(html);
+  } catch (error) {
+    res.status(500).send('Error loading dashboard: ' + error.message);
+  }
 });
 
-// Use raw body ONLY for the webhook route (needed for HMAC verification)
-// This MUST come BEFORE any JSON parsing middleware
+// Webhook endpoint - uses raw body for HMAC verification
 app.post('/webhooks/shopify/orders/create',
   express.raw({ type: 'application/json' }),
-  handleShopifyOrderWebhook
+  handleWebhook
 );
 
-// JSON parsing for other routes (if you add any later)
 app.use(express.json());
 
-// ══════════════════════════════════════════════════════════════════════════════
-// HMAC VERIFICATION (Security)
-// ══════════════════════════════════════════════════════════════════════════════
-/**
- * Verifies that the webhook actually came from Shopify
- * @param {Buffer|string} rawBody - The raw request body
- * @param {string} hmacHeader - The X-Shopify-Hmac-Sha256 header value
- * @returns {boolean} - True if valid, false otherwise
- */
+// ═══════════════════════════════════════════════════════════════════════════
+// HMAC VERIFICATION
+// ═══════════════════════════════════════════════════════════════════════════
 function verifyShopifyWebhook(rawBody, hmacHeader) {
-  if (!hmacHeader || !rawBody) {
-    console.warn('❌ HMAC verification failed: Missing header or body');
-    return false;
-  }
-
-  // Make sure we have the webhook secret
-  if (!process.env.SHOPIFY_WEBHOOK_SECRET) {
-    console.error('❌ SHOPIFY_WEBHOOK_SECRET environment variable not set!');
-    return false;
-  }
-
-  // Calculate what the HMAC should be
+  if (!hmacHeader || !rawBody) return false;
+  
   const digest = crypto
     .createHmac('sha256', process.env.SHOPIFY_WEBHOOK_SECRET)
     .update(rawBody, 'utf8')
     .digest('base64');
-
-  // Use timingSafeEqual to prevent timing attacks
+  
   try {
     return crypto.timingSafeEqual(
       Buffer.from(digest, 'utf8'),
       Buffer.from(hmacHeader, 'utf8')
     );
-  } catch (error) {
-    console.warn('❌ HMAC verification failed:', error.message);
+  } catch {
     return false;
   }
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// TEPO CUSTOMIZATION FORMATTER
-// ══════════════════════════════════════════════════════════════════════════════
-/**
- * Formats ugly Tepo customizations into clean, readable text for gift notes
- * @param {Array} lineItems - Array of line items from Shopify order
- * @returns {string} - Formatted customization text
- */
+// ═══════════════════════════════════════════════════════════════════════════
+// TEPO FORMATTER
+// ═══════════════════════════════════════════════════════════════════════════
 function formatTepoCustomizations(lineItems = []) {
   let formatted = 'CUSTOMIZATIONS:\n\n';
-  let hasAnyCustomizations = false;
+  let hasAny = false;
 
   for (const item of lineItems) {
-    // Skip items without properties
     if (!item.properties || item.properties.length === 0) continue;
 
-    // Filter out technical/internal properties that customers don't need to see
+    // Filter out technical junk
     const cleanProps = item.properties.filter((prop) => {
       const name = String(prop.name || '');
-      // Remove properties starting with underscore or containing technical IDs
       return !name.startsWith('_') &&
              !name.includes('optionSetId') &&
              !name.includes('hc_default') &&
              !name.includes('copy');
     });
 
-    // Skip if no clean properties remain
     if (cleanProps.length === 0) continue;
+    hasAny = true;
 
-    hasAnyCustomizations = true;
-
-    // Add item name as header
     formatted += `${item.title}:\n`;
 
-    // Add each customization with checkbox format
     for (const prop of cleanProps) {
       let value = String(prop.value ?? '');
-      
-      // Strip out measurement details like "(12.3 mm ...)" that clutter the display
+      // Remove measurement details like "(12.3 mm ...)"
       value = value.replace(/\([^)]*\d+\.?\d*\s*mm[^)]*\)/gi, '').trim();
-      
-      // Add the customization with checkbox
       formatted += `☐ ${prop.name}: ${value}\n`;
     }
-
-    formatted += '\n'; // Add spacing between items
+    formatted += '\n';
   }
 
-  // If no customizations were found, return empty string
-  return hasAnyCustomizations ? formatted : '';
+  return hasAny ? formatted : '';
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// SHIPSTATION API HELPERS
-// ══════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════
+// DETERMINE TAG TYPE (Charm vs Customization)
+// ═══════════════════════════════════════════════════════════════════════════
+function determineTagType(lineItems = []) {
+  // Check if any item has "charm" in its properties
+  for (const item of lineItems) {
+    if (!item.properties || item.properties.length === 0) continue;
 
-/**
- * Searches ShipStation for an order by its order number
- * @param {string} orderNumber - The Shopify order number (e.g., "#1001")
- * @returns {Object|null} - The ShipStation order object or null if not found
- */
-async function findShipStationOrderByNumber(orderNumber) {
-  const url = 'https://ssapi.shipstation.com/orders';
-  
-  // ShipStation stores order numbers WITHOUT the # symbol
-  // Shopify sends them WITH the # symbol, so we need to strip it
-  const cleanOrderNumber = orderNumber.replace('#', '');
-  
-  console.log(`🔎 DEBUG: Searching ShipStation for order number: "${cleanOrderNumber}"`);
-  
-  try {
-    const response = await axios.get(url, {
-      params: { orderNumber: cleanOrderNumber },
-      auth: {
-        username: process.env.SHIPSTATION_API_KEY,
-        password: process.env.SHIPSTATION_API_SECRET
-      },
-      timeout: 15000, // 15 second timeout
-    });
-
-    console.log(`🔎 DEBUG: ShipStation returned ${response.data?.orders?.length || 0} orders`);
-    
-    if (response.data?.orders?.length > 0) {
-      const order = response.data.orders[0];
-      console.log(`🔎 DEBUG: Found order! ID: ${order.orderId}, Number: "${order.orderNumber}"`);
-      return order;
+    // Check item title
+    if (item.title && item.title.toLowerCase().includes('charm')) {
+      return 'charm';
     }
-    
-    console.log(`🔎 DEBUG: No orders found matching "${cleanOrderNumber}"`);
-    return null;
-  } catch (error) {
-    console.error(`❌ Error finding order ${orderNumber}:`, error.message);
-    if (error.response?.data) {
-      console.error(`❌ ShipStation error details:`, JSON.stringify(error.response.data));
+
+    // Check properties
+    for (const prop of item.properties) {
+      const name = String(prop.name || '').toLowerCase();
+      const value = String(prop.value || '').toLowerCase();
+      
+      if (name.includes('charm') || value.includes('charm')) {
+        return 'charm';
+      }
     }
-    return null;
   }
+
+  // Default to customization if no charm found
+  return 'customization';
 }
 
-/**
- * Gets the complete order details from ShipStation
- * @param {number} orderId - The ShipStation internal order ID
- * @returns {Object} - Complete order object with all fields
- */
-async function getFullOrder(orderId) {
-  const url = `https://ssapi.shipstation.com/orders/${orderId}`;
-  
-  try {
-    const response = await axios.get(url, {
-      auth: {
-        username: process.env.SHIPSTATION_API_KEY,
-        password: process.env.SHIPSTATION_API_SECRET
-      },
-      timeout: 15000,
-    });
-    
-    return response.data;
-  } catch (error) {
-    console.error(`❌ Error getting full order ${orderId}:`, error.message);
-    throw error;
-  }
-}
-
-/**
- * Updates ONLY the gift message field in ShipStation (preserves all other data)
- * We have to GET the full order first, then POST it back with gift message changed
- * because ShipStation's API requires all fields even for partial updates
- * 
- * @param {number} orderId - The ShipStation internal order ID
- * @param {string} message - The gift message content
- */
-async function updateShipStationGiftMessage(orderId, message) {
-  const url = 'https://ssapi.shipstation.com/orders/createorder';
-  
-  console.log(`📝 Getting full order ${orderId} from ShipStation...`);
-  
-  try {
-    // First, GET the complete order with all fields
-    const fullOrder = await getFullOrder(orderId);
-    
-    console.log(`📝 Updating gift message for order ${orderId}...`);
-    
-    // Take the full order object and only change the gift message
-    const updatedOrder = {
-      ...fullOrder,           // Keep everything the same
-      giftMessage: message,   // Only update this field
-    };
-    
-    await axios.post(url, updatedOrder, {
-      auth: {
-        username: process.env.SHIPSTATION_API_KEY,
-        password: process.env.SHIPSTATION_API_SECRET
-      },
-      timeout: 15000,
-    });
-    
-    console.log(`✅ Successfully updated gift note for order ID ${orderId}`);
-  } catch (error) {
-    console.error(`❌ Error updating gift message for order ${orderId}:`, 
-                  error.response?.data || error.message);
-    throw error; // Re-throw so the caller knows it failed
-  }
-}
-
-/**
- * Polls ShipStation repeatedly with exponential backoff until order is found
- * This is necessary because Shopify webhook fires BEFORE order syncs to ShipStation
- * 
- * Backoff schedule: 5s, 10s, 15s, 20s, then 60s intervals up to 10 minutes total
- * 
- * @param {string} orderNumber - The Shopify order number
- * @param {string} giftMessage - The formatted gift message to set
- * @returns {Promise<boolean>} - True if successful, false if gave up
- */
-async function pollShipStationAndUpdate(orderNumber, giftMessage) {
-  // Start with shorter intervals, then switch to 60s intervals
-  // Total wait time: ~10 minutes (plenty of time for sync)
-  const backoffs = [
-    5000,   // 5s
-    10000,  // 10s  
-    15000,  // 15s
-    20000,  // 20s
-    60000,  // 1min
-    60000,  // 1min
-    60000,  // 1min
-    60000,  // 1min
-    60000,  // 1min
-    60000,  // 1min
-    60000,  // 1min
-    60000,  // 1min (total ~10 minutes)
-  ];
-  
-  for (let i = 0; i < backoffs.length; i++) {
-    console.log(`🔍 Looking for order ${orderNumber} in ShipStation (attempt ${i + 1}/${backoffs.length})...`);
-    
-    const found = await findShipStationOrderByNumber(orderNumber);
-    
-    if (found) {
-      // Success! Order exists in ShipStation, update the gift note
-      // The function will GET the full order itself
-      await updateShipStationGiftMessage(found.orderId, giftMessage);
-      console.log(`✅ Completed processing for order ${orderNumber}`);
-      return true;
-    }
-    
-    // Not found yet, wait before trying again
-    console.log(`⏳ Order ${orderNumber} not in ShipStation yet. Waiting ${backoffs[i]/1000}s...`);
-    await new Promise((resolve) => setTimeout(resolve, backoffs[i]));
-  }
-  
-  // Gave up after all retries
-  console.warn(`⚠️ Gave up waiting for order ${orderNumber} to appear in ShipStation after 10 minutes`);
-  return false;
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════
 // WEBHOOK HANDLER
-// ══════════════════════════════════════════════════════════════════════════════
-
-/**
- * Main webhook handler that receives Shopify order creation events
- * and updates ShipStation gift notes with formatted customizations
- */
-async function handleShopifyOrderWebhook(req, res) {
+// ═══════════════════════════════════════════════════════════════════════════
+async function handleWebhook(req, res) {
   try {
-    // Extract Shopify headers
-    const hmac = req.get('X-Shopify-Hmac-Sha256') || req.get('x-shopify-hmac-sha256');
+    const hmac = req.get('X-Shopify-Hmac-Sha256');
     const topic = req.get('X-Shopify-Topic') || 'orders/create';
-    const shop = req.get('X-Shopify-Shop-Domain') || 'unknown.myshopify.com';
+    const shop = req.get('X-Shopify-Shop-Domain') || 'unknown';
     
     console.log(`\n${'═'.repeat(80)}`);
-    console.log(`📨 Received webhook: ${topic} from ${shop}`);
+    console.log(`📨 Webhook: ${topic} from ${shop}`);
     console.log(`${'═'.repeat(80)}`);
 
-    // Get the raw body (needed for HMAC verification)
     const rawBody = req.body instanceof Buffer ? req.body.toString('utf8') : '';
     
-    // Verify HMAC to make sure this is really from Shopify
-    const valid = verifyShopifyWebhook(rawBody, hmac);
-    
-    if (!valid) {
-      console.warn(`❌ HMAC verification failed for ${topic} from ${shop}`);
+    if (!verifyShopifyWebhook(rawBody, hmac)) {
+      console.warn('❌ HMAC verification failed');
       return res.status(401).send('Unauthorized');
     }
     
-    console.log('✅ HMAC verified - webhook is authentic');
+    console.log('✅ HMAC verified');
 
-    // Parse the order data (AFTER we've verified it's legit)
     const order = JSON.parse(rawBody);
-    console.log(`📦 Processing order: ${order.name} (${order.line_items?.length || 0} items)`);
+    console.log(`📦 Order: ${order.name} (ID: ${order.id})`);
 
-    // Format the customizations into clean text
-    const giftMessage = formatTepoCustomizations(order.line_items);
+    // Format customizations
+    const formattedNote = formatTepoCustomizations(order.line_items);
     
-    if (!giftMessage) {
-      console.log('ℹ️  No customizations found in this order, skipping ShipStation update');
+    if (!formattedNote) {
+      console.log('ℹ️  No customizations found, skipping');
       return res.status(200).send('OK');
     }
     
-    console.log('✨ Formatted customizations:', 
-                giftMessage.split('\n').slice(0, 5).join('\n') + '\n...');
+    console.log('✨ Formatted customizations');
 
-    // Respond to Shopify immediately (they require a fast 200 OK)
-    // We'll do the ShipStation work in the background
+    // Determine tag type (charm or customization)
+    const tagType = determineTagType(order.line_items);
+    console.log(`🏷️  Tag type: ${tagType}`);
+
+    // Add to database queue
+    await db.addOrder(
+      order.id,
+      order.name.replace('#', ''), // Strip # for ShipStation search
+      formattedNote,
+      tagType
+    );
+
+    console.log('💾 Order queued for processing');
+
+    // Respond immediately
     res.status(200).send('OK');
-    console.log('✅ Sent 200 OK to Shopify');
-
-    // Do the ShipStation work AFTER responding to Shopify
-    // Using 'finish' event ensures the response is fully sent first
-    res.on('finish', async () => {
-      try {
-        console.log('🚀 Starting background ShipStation update...');
-        await pollShipStationAndUpdate(order.name, giftMessage);
-      } catch (error) {
-        // Log the error but don't crash - we already responded to Shopify
-        console.error('💥 Background processing failed:', 
-                      error.response?.data || error.message);
-      }
-    });
+    console.log('✅ Sent 200 OK to Shopify\n');
 
   } catch (error) {
-    console.error('💥 Webhook handler error:', error.response?.data || error.message);
-    
-    // If we haven't sent a response yet, send a 200 anyway to avoid Shopify retries
-    // (We log the error for debugging but don't want Shopify to keep retrying)
-    if (!res.headersSent) {
-      res.status(200).send('OK');
-    }
+    console.error('💥 Webhook error:', error.message);
+    if (!res.headersSent) res.status(200).send('OK');
   }
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════
 // START SERVER
-// ══════════════════════════════════════════════════════════════════════════════
-
+// ═══════════════════════════════════════════════════════════════════════════
 app.listen(PORT, () => {
   console.log(`\n${'═'.repeat(80)}`);
   console.log(`🚀 Webhook server running on port ${PORT}`);
-  console.log(`📝 Endpoints:`);
-  console.log(`   GET  /              - Server status`);
-  console.log(`   GET  /health        - Health check`);
-  console.log(`   POST /webhooks/shopify/orders/create - Shopify webhook`);
+  console.log(`📊 Dashboard: http://localhost:${PORT}/`);
+  console.log(`📝 Webhook endpoint: POST /webhooks/shopify/orders/create`);
   console.log(`${'═'.repeat(80)}\n`);
   
-  // Verify environment variables are set
   const missing = [];
   if (!process.env.SHOPIFY_WEBHOOK_SECRET) missing.push('SHOPIFY_WEBHOOK_SECRET');
-  if (!process.env.SHIPSTATION_API_KEY) missing.push('SHIPSTATION_API_KEY');
-  if (!process.env.SHIPSTATION_API_SECRET) missing.push('SHIPSTATION_API_SECRET');
   
   if (missing.length > 0) {
-    console.error(`⚠️  WARNING: Missing environment variables: ${missing.join(', ')}`);
-    console.error(`   The webhook will not work without these!`);
+    console.error(`⚠️  Missing env vars: ${missing.join(', ')}`);
   } else {
-    console.log('✅ All environment variables are set');
+    console.log('✅ All environment variables set');
   }
+});
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  console.log('Received SIGTERM, closing database...');
+  db.close();
+  process.exit(0);
+});
+
+process.on('SIGINT', () => {
+  console.log('Received SIGINT, closing database...');
+  db.close();
+  process.exit(0);
 });
