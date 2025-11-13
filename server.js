@@ -400,6 +400,17 @@ function determineTagType(lineItems = []) {
   for (const item of lineItems) {
     if (!item.properties || item.properties.length === 0) continue;
 
+    // Check for "elastic" in stringified properties
+    for (const prop of item.properties) {
+      const name = String(prop.name || '').toLowerCase();
+      const value = String(prop.value || '').toLowerCase();
+
+      if (name.includes('elastic') || value.includes('elastic')) {
+        return 'Elastic';
+      }
+    }
+
+    // Check for charm
     if (item.title && item.title.toLowerCase().includes('charm')) {
       return 'charm';
     }
@@ -407,7 +418,7 @@ function determineTagType(lineItems = []) {
     for (const prop of item.properties) {
       const name = String(prop.name || '').toLowerCase();
       const value = String(prop.value || '').toLowerCase();
-      
+
       if (name.includes('charm') || value.includes('charm')) {
         return 'charm';
       }
