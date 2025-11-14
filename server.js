@@ -383,7 +383,7 @@ function formatTepoCustomizations(lineItems = []) {
     if (cleanProps.length === 0) continue;
     hasAny = true;
 
-    formatted += `${item.title}:\n`;
+    formatted += `${item.name}:\n`;
 
     for (const prop of cleanProps) {
       let value = String(prop.value ?? '');
@@ -400,7 +400,7 @@ function determineTagType(lineItems = []) {
   for (const item of lineItems) {
     if (!item.properties || item.properties.length === 0) continue;
 
-    if (item.title && item.title.toLowerCase().includes('charm')) {
+    if (item.name && item.name.toLowerCase().includes('charm')) {
       return 'charm';
     }
 
