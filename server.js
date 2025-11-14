@@ -443,6 +443,21 @@ async function handleWebhook(req, res) {
     const order = JSON.parse(rawBody);
     console.log(`📦 Order: ${order.name} (ID: ${order.id})`);
 
+        // ============ ADD THIS DEBUG SECTION ============
+    // Debug: Log the first line item with customizations to see field structure
+    const itemWithProps = order.line_items?.find(item => 
+      item.properties && item.properties.length > 0
+    );
+    
+    if (itemWithProps) {
+      console.log('\n🔍 DEBUG - Line item with customizations:');
+      console.log('  name:', itemWithProps.name);
+      console.log('  title:', itemWithProps.title);
+      console.log('  variant_title:', itemWithProps.variant_title);
+      console.log('  sku:', itemWithProps.sku);
+      // This will help you see if name includes the full title + variant
+    }
+
     const formattedNote = formatTepoCustomizations(order.line_items);
     
     if (!formattedNote) {
