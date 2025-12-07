@@ -383,10 +383,18 @@ function formatTepoCustomizations(lineItems = []) {
     if (cleanProps.length === 0) continue;
     hasAny = true;
 
-    formatted += `${item.name}:\n`;
+    // ══════════════════════════════════════════════════════════════════════
+    // FIX: Combine product name with variant title (like Tampermonkey sees)
+    // ══════════════════════════════════════════════════════════════════════
+    const fullName = [item.name, item.variant_title]
+      .filter(Boolean)  // removes null/undefined/empty values
+      .join(' - ');     // "Product Name - Variant Title"
+    
+    formatted += `${fullName}\n`;  // Note: removed the colon, matching your Tampermonkey format
 
     for (const prop of cleanProps) {
       let value = String(prop.value ?? '');
+      // Remove measurement parentheticals like "(150mm x 200mm)"
       value = value.replace(/\([^)]*\d+\.?\d*\s*mm[^)]*\)/gi, '').trim();
       formatted += `☐ ${prop.name}: ${value}\n`;
     }
