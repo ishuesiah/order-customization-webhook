@@ -365,44 +365,97 @@ function verifyShopifyWebhook(rawBody, hmacHeader) {
 // TEPO FORMATTER
 // ═══════════════════════════════════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════════════════════════
+// TEPO FORMATTER
+// ═══════════════════════════════════════════════════════════════════════════
+
 function formatTepoCustomizations(lineItems = []) {
-  let formatted = 'CUSTOMIZATIONS:\n\n';
-  let hasAny = false;
-
-  for (const item of lineItems) {
-    if (!item.properties || item.properties.length === 0) continue;
-
-    const cleanProps = item.properties.filter((prop) => {
-      const name = String(prop.name || '');
-      return !name.startsWith('_') &&
-             !name.includes('optionSetId') &&
-             !name.includes('hc_default') &&
-             !name.includes('copy');
-    });
-
-    if (cleanProps.length === 0) continue;
-    hasAny = true;
-
-    // ══════════════════════════════════════════════════════════════════════
-    // FIX: Combine product name with variant title (like Tampermonkey sees)
-    // ══════════════════════════════════════════════════════════════════════
-    const fullName = [item.name, item.variant_title]
-      .filter(Boolean)  // removes null/undefined/empty values
-      .join(' - ');     // "Product Name - Variant Title"
-    
-    formatted += `${fullName}\n`;  // Note: removed the colon, matching your Tampermonkey format
-
-    for (const prop of cleanProps) {
-      let value = String(prop.value ?? '');
-      // Remove measurement parentheticals like "(150mm x 200mm)"
-      value = value.replace(/\([^)]*\d+\.?\d*\s*mm[^)]*\)/gi, '').trim();
-      formatted += `☐ ${prop.name}: ${value}\n`;
+    let formatted = 'CUSTOMIZATIONS:\n\n';
+    let hasAny = false;
+    let hasCharms = false;  // Track if any charms are present for the signature line
+  
+    for (const item of lineItems) {
+      if (!item.properties || item.properties.length === 0) continue;
+  
+      // Filter out internal/hidden properties (ones starting with _ or containing system keys)
+      const cleanProps = item.properties.filter((prop) => {
+        const name = String(prop.name || '');
+        return !name.startsWith('_') &&
+               !name.includes('optionSetId') &&
+               !name.includes('hc_default') &&
+               !name.includes('copy');
+      });
+  
+      if (cleanProps.length === 0) continue;
+      hasAny = true;
+  
+      // ══════════════════════════════════════════════════════════════════════
+      // FIX #1: Just use item.name - it already includes variant info from Shopify
+      // The webhook payload's item.name is typically "Product Title - Variant Title"
+      // ══════════════════════════════════════════════════════════════════════
+      const productName = item.name || item.title || 'Unknown Product';
+      
+      // Check if this item is a charm (for tracking signature line need)
+      const isCharmItem = productName.toLowerCase().includes('charm');
+      if (isCharmItem) hasCharms = true;
+  
+      formatted += `${productName}\n`;
+  
+      // ══════════════════════════════════════════════════════════════════════
+      // FIX #2: Handle monogram properties specially
+      // Look for monogram-related properties and format as "Ribbon one monogram: 'X'"
+      // ══════════════════════════════════════════════════════════════════════
+      
+      // First, check if any properties indicate this is a monogram charm
+      const monogramProp = cleanProps.find((prop) => {
+        const name = String(prop.name || '').toLowerCase();
+        const value = String(prop.value || '').toLowerCase();
+        // Look for properties like "Monogram Letter", "Letter", "Initial", etc.
+        return name.includes('monogram') || 
+               name.includes('letter') || 
+               name.includes('initial') ||
+               // Also check if it's a single character value (likely a monogram letter)
+               (value.length === 1 && /^[a-z]$/i.test(value));
+      });
+  
+      // Check if this is a ribbon/monogram charm item
+      const isMonogramCharm = productName.toLowerCase().includes('monogram') || 
+                              productName.toLowerCase().includes('ribbon');
+  
+      for (const prop of cleanProps) {
+        const propName = String(prop.name || '');
+        const propNameLower = propName.toLowerCase();
+        let value = String(prop.value ?? '');
+        
+        // Remove measurement parentheticals like "(150mm x 200mm)"
+        value = value.replace(/\([^)]*\d+\.?\d*\s*mm[^)]*\)/gi, '').trim();
+  
+        // Special handling for monogram letters on ribbon charms
+        if (isMonogramCharm && 
+            (propNameLower.includes('monogram') || 
+             propNameLower.includes('letter') || 
+             propNameLower.includes('initial') ||
+             (value.length === 1 && /^[a-z]$/i.test(value)))) {
+          // Format as "Ribbon one monogram: 'M'"
+          formatted += `☐ Ribbon one monogram: '${value.toUpperCase()}'\n`;
+        } else {
+          // Standard formatting for other properties
+          formatted += `☐ ${propName}: ${value}\n`;
+        }
+      }
+      formatted += '\n';
     }
-    formatted += '\n';
+  
+    // ══════════════════════════════════════════════════════════════════════
+    // FIX #3: Add signature line at the bottom if there are any charms
+    // ══════════════════════════════════════════════════════════════════════
+    if (hasAny && hasCharms) {
+      formatted += '════════════════════════════════════════\n';
+      formatted += 'Charm(s) handplaced by: ____________________________\n';
+    }
+  
+    return hasAny ? formatted : '';
   }
-
-  return hasAny ? formatted : '';
-}
 
 function determineTagType(lineItems = []) {
   for (const item of lineItems) {
