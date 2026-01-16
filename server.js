@@ -378,12 +378,13 @@ function formatTepoCustomizations(lineItems = []) {
       if (!item.properties || item.properties.length === 0) continue;
   
       // Filter out internal/hidden properties (ones starting with _ or containing system keys)
+      // Note: We allow properties with "copy" in the name (like "Second Ribbon Charm copy")
+      // because Shopify uses this naming convention for additional selections
       const cleanProps = item.properties.filter((prop) => {
         const name = String(prop.name || '');
         return !name.startsWith('_') &&
                !name.includes('optionSetId') &&
-               !name.includes('hc_default') &&
-               !name.includes('copy');
+               !name.includes('hc_default');
       });
   
       if (cleanProps.length === 0) continue;
