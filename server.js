@@ -595,34 +595,34 @@ async function getFullOrder(orderId) {
 
 async function updateGiftMessage(orderId, giftMessage) {
   const client = createShipStationClient();
-  
+
   try {
     console.log(`  📝 Getting full order ${orderId}...`);
     const fullOrder = await getFullOrder(orderId);
-    
-    // DEBUG: Log what we GET from ShipStation
-    console.log(`  🔍 BEFORE UPDATE - Order has ${fullOrder.customsItems?.length || 0} customs items`);
-    console.log(`  🔍 BEFORE UPDATE - customsItems:`, JSON.stringify(fullOrder.customsItems, null, 2));
-    console.log(`  🔍 BEFORE UPDATE - internationalOptions:`, JSON.stringify(fullOrder.internationalOptions, null, 2));
-    
+
+    // Log item count for debugging
+    console.log(`  🔍 Order has ${fullOrder.items?.length || 0} line items`);
+
     console.log(`  📝 Updating gift message...`);
+
+    // IMPORTANT: Only send fields we need to update, plus required identifiers.
+    // Do NOT send 'items' - ShipStation replaces all items if included, and
+    // items returned from GET contain read-only fields that cause issues.
+    // By omitting 'items', ShipStation preserves existing line items.
     const updatedOrder = {
-      ...fullOrder,
+      orderId: fullOrder.orderId,
+      orderNumber: fullOrder.orderNumber,
+      orderKey: fullOrder.orderKey,
+      orderDate: fullOrder.orderDate,
+      orderStatus: fullOrder.orderStatus,
+      billTo: fullOrder.billTo,
+      shipTo: fullOrder.shipTo,
       giftMessage: giftMessage
     };
-    
-    // DEBUG: Log what we're SENDING to ShipStation
-    console.log(`  🔍 SENDING TO SS - Order has ${updatedOrder.customsItems?.length || 0} customs items`);
-    console.log(`  🔍 SENDING TO SS - customsItems:`, JSON.stringify(updatedOrder.customsItems, null, 2));
-    
+
     await client.post('/orders/createorder', updatedOrder);
-    console.log(`  ✅ Gift message updated`);
-    
-    // DEBUG: Get the order again to see what changed
-    const afterOrder = await getFullOrder(orderId);
-    console.log(`  🔍 AFTER UPDATE - Order has ${afterOrder.customsItems?.length || 0} customs items`);
-    console.log(`  🔍 AFTER UPDATE - customsItems:`, JSON.stringify(afterOrder.customsItems, null, 2));
-    
+    console.log(`  ✅ Gift message updated (items preserved: ${fullOrder.items?.length || 0})`);
+
     return true;
   } catch (error) {
     console.error(`  ❌ Error updating gift message:`, error.response?.data || error.message);
