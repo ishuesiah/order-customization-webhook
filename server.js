@@ -550,6 +550,72 @@ async function handleWebhook(req, res) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// PARCEL SELECTION CONFIGURATION
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Box dimensions in centimeters (L × W × H)
+const PACKAGE_DIMENSIONS = {
+  'BoxMaster 2"': { length: 25.4, width: 17.78, height: 5, units: 'centimeters' },
+  'BoxMaster 3"': { length: 27.94, width: 20.95, height: 7.62, units: 'centimeters' },
+  'BoxMaster 6"': { length: 29.21, width: 24.13, height: 15.24, units: 'centimeters' }
+};
+
+// Weight thresholds in kilograms
+const WEIGHT_THRESHOLDS = {
+  small: 1.5,   // < 1.5 kg → BoxMaster 2"
+  medium: 2.5   // >= 1.5 kg and < 2.5 kg → BoxMaster 3", >= 2.5 kg → BoxMaster 6"
+};
+
+// International carrier settings
+const INTERNATIONAL_CARRIER = {
+  carrierCode: 'ups',
+  serviceCode: 'ups_worldwide_expedited'
+};
+
+// Helper: Check if order is international (not US or Canada)
+function isInternational(shipTo) {
+  if (!shipTo || !shipTo.country) return false;
+  const country = shipTo.country.toUpperCase();
+  return country !== 'US' && country !== 'USA' && country !== 'CA' && country !== 'CAN' && country !== 'CANADA';
+}
+
+// Helper: Convert ShipStation weight to kilograms
+function getWeightInKg(weight) {
+  if (!weight || weight.value === undefined || weight.value === null) return 0;
+
+  const units = (weight.units || '').toLowerCase();
+  const value = weight.value;
+
+  switch (units) {
+    case 'ounces':
+    case 'oz':
+      return value * 0.0283495;
+    case 'pounds':
+    case 'lbs':
+    case 'lb':
+      return value * 0.453592;
+    case 'grams':
+    case 'g':
+      return value / 1000;
+    case 'kilograms':
+    case 'kg':
+    default:
+      return value;
+  }
+}
+
+// Helper: Select package dimensions based on weight
+function selectPackageByWeight(weightInKg) {
+  if (weightInKg < WEIGHT_THRESHOLDS.small) {
+    return { name: 'BoxMaster 2"', dimensions: PACKAGE_DIMENSIONS['BoxMaster 2"'] };
+  } else if (weightInKg < WEIGHT_THRESHOLDS.medium) {
+    return { name: 'BoxMaster 3"', dimensions: PACKAGE_DIMENSIONS['BoxMaster 3"'] };
+  } else {
+    return { name: 'BoxMaster 6"', dimensions: PACKAGE_DIMENSIONS['BoxMaster 6"'] };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // SHIPSTATION API
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -592,39 +658,58 @@ async function getFullOrder(orderId) {
   }
 }
 
-async function updateGiftMessage(orderId, giftMessage) {
+async function updateOrderDetails(orderId, giftMessage) {
   const client = createShipStationClient();
-  
+
   try {
     console.log(`  📝 Getting full order ${orderId}...`);
     const fullOrder = await getFullOrder(orderId);
-    
+
     // DEBUG: Log what we GET from ShipStation
     console.log(`  🔍 BEFORE UPDATE - Order has ${fullOrder.customsItems?.length || 0} customs items`);
-    console.log(`  🔍 BEFORE UPDATE - customsItems:`, JSON.stringify(fullOrder.customsItems, null, 2));
-    console.log(`  🔍 BEFORE UPDATE - internationalOptions:`, JSON.stringify(fullOrder.internationalOptions, null, 2));
-    
-    console.log(`  📝 Updating gift message...`);
+
+    // Start building the updated order
     const updatedOrder = {
       ...fullOrder,
       giftMessage: giftMessage
     };
-    
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // PARCEL SELECTION LOGIC
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // Get weight and select appropriate package
+    const weightInKg = getWeightInKg(fullOrder.weight);
+    const selectedPackage = selectPackageByWeight(weightInKg);
+
+    console.log(`  📦 Weight: ${weightInKg.toFixed(2)} kg → Package: ${selectedPackage.name}`);
+
+    // Set package dimensions
+    updatedOrder.dimensions = selectedPackage.dimensions;
+
+    // Check if international and set carrier
+    const isIntl = isInternational(fullOrder.shipTo);
+
+    if (isIntl) {
+      console.log(`  🌍 International order (${fullOrder.shipTo?.country}) → Setting UPS Worldwide Expedited`);
+      updatedOrder.carrierCode = INTERNATIONAL_CARRIER.carrierCode;
+      updatedOrder.serviceCode = INTERNATIONAL_CARRIER.serviceCode;
+    } else {
+      console.log(`  🏠 Domestic order (${fullOrder.shipTo?.country})`);
+    }
+
     // DEBUG: Log what we're SENDING to ShipStation
-    console.log(`  🔍 SENDING TO SS - Order has ${updatedOrder.customsItems?.length || 0} customs items`);
-    console.log(`  🔍 SENDING TO SS - customsItems:`, JSON.stringify(updatedOrder.customsItems, null, 2));
-    
+    console.log(`  🔍 SENDING TO SS - dimensions:`, JSON.stringify(updatedOrder.dimensions));
+    if (isIntl) {
+      console.log(`  🔍 SENDING TO SS - carrier: ${updatedOrder.carrierCode}, service: ${updatedOrder.serviceCode}`);
+    }
+
     await client.post('/orders/createorder', updatedOrder);
-    console.log(`  ✅ Gift message updated`);
-    
-    // DEBUG: Get the order again to see what changed
-    const afterOrder = await getFullOrder(orderId);
-    console.log(`  🔍 AFTER UPDATE - Order has ${afterOrder.customsItems?.length || 0} customs items`);
-    console.log(`  🔍 AFTER UPDATE - customsItems:`, JSON.stringify(afterOrder.customsItems, null, 2));
-    
+    console.log(`  ✅ Order updated (gift message + package${isIntl ? ' + carrier' : ''})`);
+
     return true;
   } catch (error) {
-    console.error(`  ❌ Error updating gift message:`, error.response?.data || error.message);
+    console.error(`  ❌ Error updating order:`, error.response?.data || error.message);
     throw error;
   }
 }
@@ -689,8 +774,8 @@ async function processOrder(order) {
     }
     
     console.log(`  ✅ Found in ShipStation! Order ID: ${shipstationOrder.orderId}`);
-    
-    await updateGiftMessage(shipstationOrder.orderId, order.formatted_note);
+
+    await updateOrderDetails(shipstationOrder.orderId, order.formatted_note);
     
     const tagId = await getTagId(order.tag_type);
     
