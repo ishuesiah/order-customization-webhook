@@ -725,7 +725,9 @@ async function updateOrderDetails(orderId, giftMessage) {
 
     console.log(`  📦 Weight: ${weightInKg.toFixed(2)} kg → Package: ${selectedPackage.name}`);
 
-    // Set package dimensions (ShipStation should match to custom package by dimensions)
+    // Set package code and dimensions
+    // "package" = custom package in ShipStation, dimensions define the size
+    updatedOrder.packageCode = 'package';
     updatedOrder.dimensions = {
       length: selectedPackage.dimensions.length,
       width: selectedPackage.dimensions.width,
@@ -745,6 +747,7 @@ async function updateOrderDetails(orderId, giftMessage) {
     }
 
     // DEBUG: Log what we're SENDING to ShipStation
+    console.log(`  🔍 SENDING TO SS - packageCode: ${updatedOrder.packageCode}`);
     console.log(`  🔍 SENDING TO SS - dimensions:`, JSON.stringify(updatedOrder.dimensions));
     if (isIntl) {
       console.log(`  🔍 SENDING TO SS - carrier: ${updatedOrder.carrierCode}, service: ${updatedOrder.serviceCode}`);
