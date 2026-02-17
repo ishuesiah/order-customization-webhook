@@ -555,9 +555,9 @@ async function handleWebhook(req, res) {
 
 // Box dimensions in centimeters (L × W × H)
 const PACKAGE_DIMENSIONS = {
-  'BoxMaster 2"': { length: 25.4, width: 17.78, height: 5, units: 'centimeters' },
-  'BoxMaster 3"': { length: 27.94, width: 20.95, height: 7.62, units: 'centimeters' },
-  'BoxMaster 6"': { length: 29.21, width: 24.13, height: 15.24, units: 'centimeters' }
+  'BoxMaster 2"': { code: 'BoxMaster 2"', length: 25.4, width: 17.78, height: 5, units: 'centimeters' },
+  'BoxMaster 3"': { code: 'BoxMaster 3"', length: 27.94, width: 20.95, height: 7.62, units: 'centimeters' },
+  'BoxMaster 6"': { code: 'BoxMaster 6"', length: 29.21, width: 24.13, height: 15.24, units: 'centimeters' }
 };
 
 // Weight thresholds in kilograms
@@ -684,8 +684,14 @@ async function updateOrderDetails(orderId, giftMessage) {
 
     console.log(`  📦 Weight: ${weightInKg.toFixed(2)} kg → Package: ${selectedPackage.name}`);
 
-    // Set package dimensions
-    updatedOrder.dimensions = selectedPackage.dimensions;
+    // Set package code and dimensions
+    updatedOrder.packageCode = selectedPackage.dimensions.code;
+    updatedOrder.dimensions = {
+      length: selectedPackage.dimensions.length,
+      width: selectedPackage.dimensions.width,
+      height: selectedPackage.dimensions.height,
+      units: selectedPackage.dimensions.units
+    };
 
     // Check if international and set carrier
     const isIntl = isInternational(fullOrder.shipTo);
@@ -699,6 +705,7 @@ async function updateOrderDetails(orderId, giftMessage) {
     }
 
     // DEBUG: Log what we're SENDING to ShipStation
+    console.log(`  🔍 SENDING TO SS - packageCode: ${updatedOrder.packageCode}`);
     console.log(`  🔍 SENDING TO SS - dimensions:`, JSON.stringify(updatedOrder.dimensions));
     if (isIntl) {
       console.log(`  🔍 SENDING TO SS - carrier: ${updatedOrder.carrierCode}, service: ${updatedOrder.serviceCode}`);
