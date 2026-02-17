@@ -173,6 +173,47 @@ app.get('/health', (req, res) => {
   res.status(200).json({ status: 'healthy', timestamp: new Date().toISOString() });
 });
 
+// List ShipStation packages (to find package codes)
+app.get('/packages', async (req, res) => {
+  try {
+    const client = axios.create({
+      baseURL: 'https://ssapi.shipstation.com',
+      auth: {
+        username: process.env.SHIPSTATION_API_KEY,
+        password: process.env.SHIPSTATION_API_SECRET
+      },
+      timeout: 15000
+    });
+
+    // Get carriers first, then get packages for each carrier
+    const carriersResponse = await client.get('/carriers');
+    const carriers = carriersResponse.data || [];
+
+    const allPackages = [];
+
+    for (const carrier of carriers) {
+      try {
+        const packagesResponse = await client.get(`/carriers/listpackages?carrierCode=${carrier.code}`);
+        const packages = packagesResponse.data || [];
+        allPackages.push({
+          carrier: carrier.name,
+          carrierCode: carrier.code,
+          packages: packages
+        });
+      } catch (err) {
+        console.log(`Could not get packages for ${carrier.code}`);
+      }
+    }
+
+    res.json({
+      message: 'Available packages by carrier',
+      data: allPackages
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Dashboard
 app.get('/', async (req, res) => {
   try {
@@ -684,8 +725,7 @@ async function updateOrderDetails(orderId, giftMessage) {
 
     console.log(`  📦 Weight: ${weightInKg.toFixed(2)} kg → Package: ${selectedPackage.name}`);
 
-    // Set package code and dimensions
-    updatedOrder.packageCode = selectedPackage.dimensions.code;
+    // Set package dimensions (ShipStation should match to custom package by dimensions)
     updatedOrder.dimensions = {
       length: selectedPackage.dimensions.length,
       width: selectedPackage.dimensions.width,
@@ -705,7 +745,6 @@ async function updateOrderDetails(orderId, giftMessage) {
     }
 
     // DEBUG: Log what we're SENDING to ShipStation
-    console.log(`  🔍 SENDING TO SS - packageCode: ${updatedOrder.packageCode}`);
     console.log(`  🔍 SENDING TO SS - dimensions:`, JSON.stringify(updatedOrder.dimensions));
     if (isIntl) {
       console.log(`  🔍 SENDING TO SS - carrier: ${updatedOrder.carrierCode}, service: ${updatedOrder.serviceCode}`);
