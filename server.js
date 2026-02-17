@@ -607,17 +607,25 @@ const WEIGHT_THRESHOLDS = {
   medium: 2.5   // >= 1.5 kg and < 2.5 kg → BoxMaster 3", >= 2.5 kg → BoxMaster 6"
 };
 
-// International carrier settings
-const INTERNATIONAL_CARRIER = {
-  carrierCode: 'ups',
-  serviceCode: 'ups_worldwide_expedited'
+// Carrier settings by destination
+const CARRIER_SETTINGS = {
+  US: { carrierCode: 'ups', serviceCode: 'ups_worldwide_expedited' },
+  CANADA: { carrierCode: 'ups', serviceCode: 'ups_standard' },
+  INTERNATIONAL: { carrierCode: 'ups', serviceCode: 'ups_worldwide_expedited' }
 };
 
-// Helper: Check if order is international (not US or Canada)
-function isInternational(shipTo) {
-  if (!shipTo || !shipTo.country) return false;
+// Helper: Get destination type (US, CANADA, or INTERNATIONAL)
+function getDestinationType(shipTo) {
+  if (!shipTo || !shipTo.country) return 'US'; // Default to US
   const country = shipTo.country.toUpperCase();
-  return country !== 'US' && country !== 'USA' && country !== 'CA' && country !== 'CAN' && country !== 'CANADA';
+
+  if (country === 'US' || country === 'USA') {
+    return 'US';
+  } else if (country === 'CA' || country === 'CAN' || country === 'CANADA') {
+    return 'CANADA';
+  } else {
+    return 'INTERNATIONAL';
+  }
 }
 
 // Helper: Convert ShipStation weight to kilograms
@@ -735,23 +743,19 @@ async function updateOrderDetails(orderId, giftMessage) {
       units: selectedPackage.dimensions.units
     };
 
-    // Check if international and set carrier
-    const isIntl = isInternational(fullOrder.shipTo);
+    // Set carrier based on destination
+    const destType = getDestinationType(fullOrder.shipTo);
+    const carrierSettings = CARRIER_SETTINGS[destType];
 
-    if (isIntl) {
-      console.log(`  🌍 International order (${fullOrder.shipTo?.country}) → Setting UPS Worldwide Expedited`);
-      updatedOrder.carrierCode = INTERNATIONAL_CARRIER.carrierCode;
-      updatedOrder.serviceCode = INTERNATIONAL_CARRIER.serviceCode;
-    } else {
-      console.log(`  🏠 Domestic order (${fullOrder.shipTo?.country})`);
-    }
+    updatedOrder.carrierCode = carrierSettings.carrierCode;
+    updatedOrder.serviceCode = carrierSettings.serviceCode;
+
+    console.log(`  🚚 Destination: ${destType} (${fullOrder.shipTo?.country}) → ${carrierSettings.serviceCode}`);
 
     // DEBUG: Log what we're SENDING to ShipStation
     console.log(`  🔍 SENDING TO SS - packageCode: ${updatedOrder.packageCode}`);
     console.log(`  🔍 SENDING TO SS - dimensions:`, JSON.stringify(updatedOrder.dimensions));
-    if (isIntl) {
-      console.log(`  🔍 SENDING TO SS - carrier: ${updatedOrder.carrierCode}, service: ${updatedOrder.serviceCode}`);
-    }
+    console.log(`  🔍 SENDING TO SS - carrier: ${updatedOrder.carrierCode}, service: ${updatedOrder.serviceCode}`);
 
     await client.post('/orders/createorder', updatedOrder);
     console.log(`  ✅ Order updated (gift message + package${isIntl ? ' + carrier' : ''})`);
