@@ -731,17 +731,10 @@ async function updateOrderDetails(orderId, giftMessage) {
     const weightInKg = getWeightInKg(fullOrder.weight);
     const selectedPackage = selectPackageByWeight(weightInKg);
 
-    console.log(`  📦 Weight: ${weightInKg.toFixed(2)} kg → Package: ${selectedPackage.name}`);
+    console.log(`  📦 Weight: ${weightInKg.toFixed(2)} kg`);
 
-    // Set package code and dimensions
-    // "package" = custom package in ShipStation, dimensions define the size
-    updatedOrder.packageCode = 'package';
-    updatedOrder.dimensions = {
-      length: selectedPackage.dimensions.length,
-      width: selectedPackage.dimensions.width,
-      height: selectedPackage.dimensions.height,
-      units: selectedPackage.dimensions.units
-    };
+    // NOTE: Package selection is handled by ShipStation automation rules
+    // We don't set packageCode or dimensions here to avoid overriding the rules
 
     // Set carrier based on destination
     const destType = getDestinationType(fullOrder.shipTo);
@@ -753,12 +746,10 @@ async function updateOrderDetails(orderId, giftMessage) {
     console.log(`  🚚 Destination: ${destType} (${fullOrder.shipTo?.country}) → ${carrierSettings.serviceCode}`);
 
     // DEBUG: Log what we're SENDING to ShipStation
-    console.log(`  🔍 SENDING TO SS - packageCode: ${updatedOrder.packageCode}`);
-    console.log(`  🔍 SENDING TO SS - dimensions:`, JSON.stringify(updatedOrder.dimensions));
     console.log(`  🔍 SENDING TO SS - carrier: ${updatedOrder.carrierCode}, service: ${updatedOrder.serviceCode}`);
 
     await client.post('/orders/createorder', updatedOrder);
-    console.log(`  ✅ Order updated (gift message + package + carrier: ${carrierSettings.serviceCode})`);
+    console.log(`  ✅ Order updated (gift message + carrier: ${carrierSettings.serviceCode})`);
 
     return true;
   } catch (error) {
