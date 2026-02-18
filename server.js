@@ -758,7 +758,7 @@ async function updateOrderDetails(orderId, giftMessage) {
     console.log(`  🔍 SENDING TO SS - carrier: ${updatedOrder.carrierCode}, service: ${updatedOrder.serviceCode}`);
 
     await client.post('/orders/createorder', updatedOrder);
-    console.log(`  ✅ Order updated (gift message + package${isIntl ? ' + carrier' : ''})`);
+    console.log(`  ✅ Order updated (gift message + package + carrier: ${carrierSettings.serviceCode})`);
 
     return true;
   } catch (error) {
