@@ -5,6 +5,7 @@
 const express = require('express');
 const crypto = require('crypto');
 const axios = require('axios');
+const fs = require('fs');
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 
@@ -12,12 +13,54 @@ const path = require('path');
 // DATABASE SETUP
 // ═══════════════════════════════════════════════════════════════════════════
 
-const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'webhook-queue.db');
+const DEFAULT_DB_FILENAME = 'webhook-queue.db';
+const PERSISTENT_DATA_ROOT = '/data';
+const PERSISTENT_DB_PATH = path.join(
+  PERSISTENT_DATA_ROOT,
+  'order-customization',
+  DEFAULT_DB_FILENAME
+);
+
+function resolveDbPath() {
+  if (process.env.DB_PATH) return process.env.DB_PATH;
+
+  try {
+    fs.accessSync(PERSISTENT_DATA_ROOT, fs.constants.W_OK);
+    return PERSISTENT_DB_PATH;
+  } catch {
+    return path.join(__dirname, DEFAULT_DB_FILENAME);
+  }
+}
+
+function ensureDatabaseDirectory(dbPath) {
+  const directory = path.dirname(dbPath);
+  fs.mkdirSync(directory, { recursive: true });
+}
+
+function logDatabaseStorageMode(dbPath) {
+  if (dbPath.startsWith(`${PERSISTENT_DATA_ROOT}/`)) {
+    console.log(`✅ Database is configured on persistent storage: ${dbPath}`);
+    return;
+  }
+
+  console.warn(`⚠️  Database path is not on ${PERSISTENT_DATA_ROOT}: ${dbPath}`);
+  console.warn('⚠️  Queue state may be lost on restart or redeploy unless DB_PATH points to mounted storage.');
+}
+
+const DB_PATH = resolveDbPath();
 let db = null;
 
 // Initialize database
 function initDatabase() {
   return new Promise((resolve, reject) => {
+    try {
+      ensureDatabaseDirectory(DB_PATH);
+    } catch (error) {
+      console.error(`❌ Error preparing database directory for ${DB_PATH}:`, error.message);
+      reject(error);
+      return;
+    }
+
     db = new sqlite3.Database(DB_PATH, (err) => {
       if (err) {
         console.error('❌ Error opening database:', err);
@@ -895,6 +938,7 @@ async function start() {
   console.log(`\n${'═'.repeat(80)}`);
   console.log(`🚀 Starting Combined Webhook + Worker Server...`);
   console.log(`${'═'.repeat(80)}\n`);
+  logDatabaseStorageMode(DB_PATH);
   
   // Initialize database
   await initDatabase();
