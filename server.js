@@ -410,6 +410,11 @@ function verifyShopifyWebhook(rawBody, hmacHeader) {
 // TEPO FORMATTER
 // ═══════════════════════════════════════════════════════════════════════════
 
+function isFreeGiftPropertyName(name = '') {
+  const normalized = String(name).toLowerCase().replace(/[^a-z0-9]/g, '');
+  return normalized.includes('freegift');
+}
+
 function formatTepoCustomizations(lineItems = []) {
     let formatted = 'CUSTOMIZATIONS:\n\n';
     let hasAny = false;
@@ -421,7 +426,7 @@ function formatTepoCustomizations(lineItems = []) {
       // Filter out internal/hidden properties (ones starting with _ or containing system keys)
       const cleanProps = item.properties.filter((prop) => {
         const name = String(prop.name || '');
-        return !name.startsWith('_') &&
+        return (!name.startsWith('_') || isFreeGiftPropertyName(name)) &&
                !name.includes('optionSetId') &&
                !name.includes('hc_default') &&
                !name.includes('copy');
@@ -470,9 +475,13 @@ function formatTepoCustomizations(lineItems = []) {
         
         // Remove measurement parentheticals like "(150mm x 200mm)"
         value = value.replace(/\([^)]*\d+\.?\d*\s*mm[^)]*\)/gi, '').trim();
-  
+
+        if (!value) continue;
+
+        if (isFreeGiftPropertyName(propName)) {
+          formatted += `☐ Free Gift: ${value}\n`;
         // Special handling for monogram letters on ribbon charms
-        if (isMonogramCharm && 
+        } else if (isMonogramCharm && 
             (propNameLower.includes('monogram') || 
              propNameLower.includes('letter') || 
              propNameLower.includes('initial') ||
