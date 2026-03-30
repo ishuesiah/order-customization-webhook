@@ -559,9 +559,12 @@ function isDuoItem(item) {
   return item.properties.some(prop => {
     const name = String(prop.name || '');
     const value = String(prop.value || '');
-    return (name === '_bundle' && value === 'Duo Bundle') || name === '_duo_accessory';
+    return name === '_bundle' && value === 'Duo Bundle';
   });
 }
+
+// Accessory property names that get added as sub-line-items on the book
+const DUO_ACCESSORY_PROPS = ['_charm1', '_charm2', '_elastic', '_front_pocket', '_back_pocket'];
 
 function formatDuoCustomizations(duoItems = []) {
   if (duoItems.length === 0) return '';
@@ -571,58 +574,58 @@ function formatDuoCustomizations(duoItems = []) {
   for (const item of duoItems) {
     const pairProp = (item.properties || []).find(p => String(p.name) === 'Duo Pair');
     const pairLabel = pairProp ? String(pairProp.value) : 'Duo';
-    if (!pairs[pairLabel]) pairs[pairLabel] = { books: [], accessories: {} };
-
-    const isAccessory = (item.properties || []).some(p => String(p.name) === '_duo_accessory');
-
-    if (isAccessory) {
-      const bookProp = (item.properties || []).find(p => String(p.name) === '_duo_book');
-      const bookLabel = bookProp ? String(bookProp.value) : 'Unknown';
-      if (!pairs[pairLabel].accessories[bookLabel]) pairs[pairLabel].accessories[bookLabel] = [];
-      pairs[pairLabel].accessories[bookLabel].push(item);
-    } else {
-      pairs[pairLabel].books.push(item);
-    }
+    if (!pairs[pairLabel]) pairs[pairLabel] = [];
+    pairs[pairLabel].push(item);
   }
 
   let formatted = 'CUSTOMIZATIONS:\n\n';
   let hasContent = false;
   let hasCharms = false;
 
-  for (const [pairLabel, pair] of Object.entries(pairs)) {
-    const allAccessories = Object.values(pair.accessories).flat();
-
-    // Check if books have free gift properties
-    const hasFreeGifts = pair.books.some(book =>
+  for (const [pairLabel, books] of Object.entries(pairs)) {
+    // Check if any book has accessory or free gift properties
+    const hasAccessories = books.some(book =>
+      (book.properties || []).some(p => DUO_ACCESSORY_PROPS.includes(String(p.name || '')))
+    );
+    const hasFreeGifts = books.some(book =>
       (book.properties || []).some(p => isFreeGiftPropertyName(String(p.name || '')))
     );
 
-    // Skip this pair if there are no accessories and no free gifts
-    if (allAccessories.length === 0 && !hasFreeGifts) continue;
+    if (!hasAccessories && !hasFreeGifts) continue;
 
     hasContent = true;
     formatted += `── DUO BUNDLE (${pairLabel}) ──\n\n`;
 
-    for (let i = 0; i < pair.books.length; i++) {
-      const book = pair.books[i];
+    for (let i = 0; i < books.length; i++) {
+      const book = books[i];
       const bookName = book.name || book.title || 'Unknown';
       const bookLabel = i === 0 ? 'Book One' : 'Book Two';
 
       formatted += `${bookLabel} — ${bookName}:\n`;
 
-      // Free gifts attached to this book
+      // Free gifts
       for (const prop of (book.properties || [])) {
         if (isFreeGiftPropertyName(String(prop.name || ''))) {
           formatted += `  ☐ Free Gift: ${String(prop.value || '')}\n`;
         }
       }
 
-      // Accessories assigned to this book
-      const bookAccessories = pair.accessories[bookLabel] || [];
-      for (const acc of bookAccessories) {
-        const accName = acc.name || acc.title || 'Accessory';
-        formatted += `  ☐ ${accName}\n`;
-        if (accName.toLowerCase().includes('charm')) hasCharms = true;
+      // Accessories (sub-line-item properties on the book)
+      for (const prop of (book.properties || [])) {
+        const propName = String(prop.name || '');
+        if (DUO_ACCESSORY_PROPS.includes(propName)) {
+          const value = String(prop.value || '');
+          if (!value) continue;
+          // Format the property name nicely
+          const label = propName.replace(/^_/, '')
+            .replace('charm1', 'Charm 1')
+            .replace('charm2', 'Charm 2')
+            .replace('elastic', 'Clip Band Elastic')
+            .replace('front_pocket', 'Front Pocket')
+            .replace('back_pocket', 'Back Pocket');
+          formatted += `  ☐ ${label}: ${value}\n`;
+          if (propName.includes('charm')) hasCharms = true;
+        }
       }
 
       formatted += '\n';
