@@ -550,6 +550,93 @@ function formatTepoCustomizations(lineItems = []) {
     return hasAny ? formatted : '';
   }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// DUO BUNDLE FORMATTER
+// ═══════════════════════════════════════════════════════════════════════════
+
+function isDuoItem(item) {
+  if (!item.properties || item.properties.length === 0) return false;
+  return item.properties.some(prop => {
+    const name = String(prop.name || '');
+    const value = String(prop.value || '');
+    return (name === '_bundle' && value === 'Duo Bundle') || name === '_duo_accessory';
+  });
+}
+
+function formatDuoCustomizations(duoItems = []) {
+  if (duoItems.length === 0) return '';
+
+  // Group by Duo Pair label
+  const pairs = {};
+  for (const item of duoItems) {
+    const pairProp = (item.properties || []).find(p => String(p.name) === 'Duo Pair');
+    const pairLabel = pairProp ? String(pairProp.value) : 'Duo';
+    if (!pairs[pairLabel]) pairs[pairLabel] = { books: [], accessories: {} };
+
+    const isAccessory = (item.properties || []).some(p => String(p.name) === '_duo_accessory');
+
+    if (isAccessory) {
+      const bookProp = (item.properties || []).find(p => String(p.name) === '_duo_book');
+      const bookLabel = bookProp ? String(bookProp.value) : 'Unknown';
+      if (!pairs[pairLabel].accessories[bookLabel]) pairs[pairLabel].accessories[bookLabel] = [];
+      pairs[pairLabel].accessories[bookLabel].push(item);
+    } else {
+      pairs[pairLabel].books.push(item);
+    }
+  }
+
+  let formatted = 'CUSTOMIZATIONS:\n\n';
+  let hasContent = false;
+  let hasCharms = false;
+
+  for (const [pairLabel, pair] of Object.entries(pairs)) {
+    const allAccessories = Object.values(pair.accessories).flat();
+
+    // Check if books have free gift properties
+    const hasFreeGifts = pair.books.some(book =>
+      (book.properties || []).some(p => isFreeGiftPropertyName(String(p.name || '')))
+    );
+
+    // Skip this pair if there are no accessories and no free gifts
+    if (allAccessories.length === 0 && !hasFreeGifts) continue;
+
+    hasContent = true;
+    formatted += `── DUO BUNDLE (${pairLabel}) ──\n\n`;
+
+    for (let i = 0; i < pair.books.length; i++) {
+      const book = pair.books[i];
+      const bookName = book.name || book.title || 'Unknown';
+      const bookLabel = i === 0 ? 'Book One' : 'Book Two';
+
+      formatted += `${bookLabel} — ${bookName}:\n`;
+
+      // Free gifts attached to this book
+      for (const prop of (book.properties || [])) {
+        if (isFreeGiftPropertyName(String(prop.name || ''))) {
+          formatted += `  ☐ Free Gift: ${String(prop.value || '')}\n`;
+        }
+      }
+
+      // Accessories assigned to this book
+      const bookAccessories = pair.accessories[bookLabel] || [];
+      for (const acc of bookAccessories) {
+        const accName = acc.name || acc.title || 'Accessory';
+        formatted += `  ☐ ${accName}\n`;
+        if (accName.toLowerCase().includes('charm')) hasCharms = true;
+      }
+
+      formatted += '\n';
+    }
+  }
+
+  if (hasContent && hasCharms) {
+    formatted += '════════════════════════════════════════\n';
+    formatted += 'Charm(s) handplaced by: ____________________________\n';
+  }
+
+  return hasContent ? formatted : '';
+}
+
 function determineTagType(lineItems = []) {
   for (const item of lineItems) {
     if (!item.properties || item.properties.length === 0) continue;
@@ -612,14 +699,28 @@ async function handleWebhook(req, res) {
       // This will help you see if name includes the full title + variant
     }
 
-    const formattedNote = formatTepoCustomizations(order.line_items);
-    
+    // Separate duo bundle items from regular (tepo/qikify) items
+    const allItems = order.line_items || [];
+    const duoItems = allItems.filter(isDuoItem);
+    const regularItems = allItems.filter(item => !isDuoItem(item));
+
+    const duoNote = formatDuoCustomizations(duoItems);
+    const tepoNote = formatTepoCustomizations(regularItems);
+
+    // Combine: duo section first, then tepo section, single header
+    let formattedNote = '';
+    if (duoNote && tepoNote) {
+      formattedNote = duoNote + '\n' + tepoNote.replace(/^CUSTOMIZATIONS:\n\n/, '');
+    } else {
+      formattedNote = duoNote || tepoNote;
+    }
+
     if (!formattedNote) {
       console.log('ℹ️  No customizations found, skipping');
       return res.status(200).send('OK');
     }
-    
-    console.log('✨ Formatted customizations');
+
+    console.log(`✨ Formatted customizations (duo: ${duoItems.length} items, tepo: ${regularItems.length} items)`);
 
     const tagType = determineTagType(order.line_items);
     console.log(`🏷️  Tag type: ${tagType}`);
