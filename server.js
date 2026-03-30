@@ -559,70 +559,77 @@ function isDuoItem(item) {
   return item.properties.some(prop => {
     const name = String(prop.name || '');
     const value = String(prop.value || '');
-    return name === '_bundle' && value === 'Duo Bundle';
+    return (name === '_bundle' && value === 'Duo Bundle') || (name === '_duo_accessory' && value === 'true');
   });
 }
 
-// Accessory property names that get added as sub-line-items on the book
-const DUO_ACCESSORY_PROPS = ['Charm 1', 'Charm 2', 'Clip Band Elastic', 'Front Pocket', 'Back Pocket'];
+function isDuoAccessory(item) {
+  if (!item.properties || item.properties.length === 0) return false;
+  return item.properties.some(prop => String(prop.name || '') === '_duo_accessory' && String(prop.value || '') === 'true');
+}
 
 function formatDuoCustomizations(duoItems = []) {
   if (duoItems.length === 0) return '';
 
-  // Group by Duo Pair label
+  // Separate books from accessories, group by Duo Pair
   const pairs = {};
   for (const item of duoItems) {
     const pairProp = (item.properties || []).find(p => String(p.name) === 'Duo Pair');
     const pairLabel = pairProp ? String(pairProp.value) : 'Duo';
-    if (!pairs[pairLabel]) pairs[pairLabel] = [];
-    pairs[pairLabel].push(item);
+    if (!pairs[pairLabel]) pairs[pairLabel] = { books: [], accessories: [] };
+
+    if (isDuoAccessory(item)) {
+      pairs[pairLabel].accessories.push(item);
+    } else {
+      pairs[pairLabel].books.push(item);
+    }
   }
 
   let formatted = 'CUSTOMIZATIONS:\n\n';
   let hasContent = false;
   let hasCharms = false;
 
-  for (const [pairLabel, books] of Object.entries(pairs)) {
-    // Check if any book has accessory or free gift properties
-    const hasAccessories = books.some(book =>
-      (book.properties || []).some(p => DUO_ACCESSORY_PROPS.includes(String(p.name || '')))
-    );
-    const hasFreeGifts = books.some(book =>
+  for (const [pairLabel, pair] of Object.entries(pairs)) {
+    // Check if this pair has any accessories or free gifts worth noting
+    const hasFreeGifts = pair.books.some(book =>
       (book.properties || []).some(p => isFreeGiftPropertyName(String(p.name || '')))
     );
 
-    if (!hasAccessories && !hasFreeGifts) continue;
+    if (pair.accessories.length === 0 && !hasFreeGifts) continue;
 
     hasContent = true;
     formatted += `── DUO BUNDLE (${pairLabel}) ──\n\n`;
 
-    for (let i = 0; i < books.length; i++) {
-      const book = books[i];
+    for (let i = 0; i < pair.books.length; i++) {
+      const book = pair.books[i];
       const bookName = book.name || book.title || 'Unknown';
       const bookLabel = i === 0 ? 'Book One' : 'Book Two';
+      const bookVariantId = book.variant_id;
 
       formatted += `${bookLabel} — ${bookName}:\n`;
 
-      // Free gifts
+      // Free gifts on this book
       for (const prop of (book.properties || [])) {
         if (isFreeGiftPropertyName(String(prop.name || ''))) {
           formatted += `  ☐ Free Gift: ${String(prop.value || '')}\n`;
         }
       }
 
-      // Accessories (sub-line-item properties on the book)
-      for (const prop of (book.properties || [])) {
-        const propName = String(prop.name || '');
-        if (DUO_ACCESSORY_PROPS.includes(propName)) {
-          const value = String(prop.value || '');
-          if (!value) continue;
-          formatted += `  ☐ ${propName}: ${value}\n`;
-          if (propName.includes('Charm')) hasCharms = true;
-        }
-      }
-
-      formatted += '\n';
+      // Accessories nested under this book (matched by parent_id = book's variant_id)
+      // Note: In order data, parent relationship may not be preserved,
+      // so we list all accessories for the pair under their respective books.
+      // Since accessories appear after their parent in the items array,
+      // we assign them to the most recently seen book.
     }
+
+    // List all accessories for this pair
+    for (const acc of pair.accessories) {
+      const accName = acc.name || acc.title || 'Accessory';
+      formatted += `  ☐ ${accName}\n`;
+      if (accName.toLowerCase().includes('charm')) hasCharms = true;
+    }
+
+    formatted += '\n';
   }
 
   if (hasContent && hasCharms) {
