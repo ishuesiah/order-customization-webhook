@@ -564,7 +564,7 @@ function isDuoItem(item) {
 }
 
 // Accessory property names that get added as sub-line-items on the book
-const DUO_ACCESSORY_PROPS = ['_charm1', '_charm2', '_elastic', '_front_pocket', '_back_pocket'];
+const DUO_ACCESSORY_PROPS = ['Charm 1', 'Charm 2', 'Clip Band Elastic', 'Front Pocket', 'Back Pocket'];
 
 function formatDuoCustomizations(duoItems = []) {
   if (duoItems.length === 0) return '';
@@ -616,15 +616,8 @@ function formatDuoCustomizations(duoItems = []) {
         if (DUO_ACCESSORY_PROPS.includes(propName)) {
           const value = String(prop.value || '');
           if (!value) continue;
-          // Format the property name nicely
-          const label = propName.replace(/^_/, '')
-            .replace('charm1', 'Charm 1')
-            .replace('charm2', 'Charm 2')
-            .replace('elastic', 'Clip Band Elastic')
-            .replace('front_pocket', 'Front Pocket')
-            .replace('back_pocket', 'Back Pocket');
-          formatted += `  ☐ ${label}: ${value}\n`;
-          if (propName.includes('charm')) hasCharms = true;
+          formatted += `  ☐ ${propName}: ${value}\n`;
+          if (propName.includes('Charm')) hasCharms = true;
         }
       }
 
